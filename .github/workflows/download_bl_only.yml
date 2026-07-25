@@ -1,15 +1,12 @@
-name: Download BL Only (No Extract)
+name: Download BL Only via Direct Link (No Extract)
 on:
   workflow_dispatch:
     inputs:
       model:
         description: 'Your Model Number (e.g., SM-G975F)'
         required: true
-      imei:
-        description: 'Your IMEI'
-        required: true
-      csc:
-        description: 'Your CSC (Samsung Region code, e.g., XSG)'
+      samfw_link:
+        description: 'Direct download link from samfw.com (or any direct .zip link)'
         required: true
       upload_to_telegram:
         description: 'Upload to Telegram'
@@ -28,60 +25,44 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install -y python3 python3-pip python-is-python3 curl
-
-      - name: Install samloader
-        run: |
-          pip3 install git+https://github.com/martinetd/samloader.git --no-warn-script-location
-
-      - name: Fetch and download firmware
+      - name: Download firmware from direct link
         run: |
           echo "MODEL=${{ github.event.inputs.model }}" >> $GITHUB_ENV
-          echo "IMEI=${{ github.event.inputs.imei }}" >> $GITHUB_ENV
-          echo "CSC=${{ github.event.inputs.csc }}" >> $GITHUB_ENV
-
-          echo "[+] Fetching latest firmware info..."
-          VERSION=$(python3 -m samloader -m "${{ github.event.inputs.model }}" -r "${{ github.event.inputs.csc }}" -i "${{ github.event.inputs.imei }}" checkupdate 2>/dev/null)
-          echo "[+] Firmware version found: $VERSION"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-          mkdir -p Downloads
-          echo "[+] Downloading firmware..."
-          python3 -m samloader -m "${{ github.event.inputs.model }}" -r "${{ github.event.inputs.csc }}" -i "${{ github.event.inputs.imei }}" download -v "$VERSION" -O Downloads
-
-          echo "[+] Decrypting firmware..."
-          FILE=$(ls Downloads/*.enc* | head -n1)
-          python3 -m samloader -m "${{ github.event.inputs.model }}" -r "${{ github.event.inputs.csc }}" -i "${{ github.event.inputs.imei }}" decrypt -v "$VERSION" -i "$FILE" -o Downloads/firmware.zip
-          rm -f "$FILE"
+          mkdir -p Downloads Dist
+          echo "[+] Downloading firmware from direct link..."
+          curl -L --fail "${{ github.event.inputs.samfw_link }}" -o Downloads/firmware.zip || {
+            echo "[x] Download failed! Make sure you provided a direct download link."
+            exit 1
+          }
+          echo "[+] Download complete!"
+          ls -lh Downloads/
 
       - name: Extract BL file only from firmware zip
         run: |
-          mkdir -p Dist
           cd Downloads
           # Extract only files matching BL*.tar.md5 from the firmware zip
-          unzip firmware.zip "BL*.tar.md5" -d ../Dist/
+          unzip -j firmware.zip "BL*.tar.md5" -d ../Dist/
           rm -f firmware.zip
           cd ..
+          echo "[+] BL file extracted:"
           ls -la Dist/
 
       - name: Upload BL as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: "BL-${{ env.MODEL }}-${{ env.VERSION }}"
+          name: "BL-${{ env.MODEL }}"
           path: Dist/BL*.tar.md5
 
       - name: Upload BL to GoFile
         run: |
           cd Dist
           for f in BL*.tar.md5; do
-            echo "Uploading $f to GoFile..."
+            echo "[+] Uploading $f to GoFile..."
             SERVER=$(curl -s https://api.gofile.io/getServer | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['server'])")
             RESPONSE=$(curl -s -X POST "https://$SERVER.gofile.io/uploadFile" -F "file=@$f")
+            echo "[+] GoFile response: $RESPONSE"
             LINK=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['downloadPage'])")
-            echo "GoFile Link: $LINK"
+            echo "[+] GoFile Link: $LINK"
             echo "GOLINK=$LINK" >> $GITHUB_ENV
           done
 
@@ -94,11 +75,9 @@ jobs:
           format: html
           disable_web_page_preview: false
           message: |
-            <b>BL Firmware Dump</b>
+            <b>BL Firmware Dump (Direct Link)</b>
 
             <b>Device:</b> ${{ env.MODEL }}
-            <b>Version:</b> ${{ env.VERSION }}
-            <b>CSC:</b> ${{ github.event.inputs.csc }}
 
             <b>Download Link:</b> ${{ env.GOLINK }}
 
