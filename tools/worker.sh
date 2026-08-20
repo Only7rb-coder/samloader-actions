@@ -8,6 +8,7 @@ source "$WDIR/tools/gofile.sh"
 # Required image files
 REQUIRED_IMAGES=(
     "boot.img"
+    "xbl_config.img"
     "init_boot.img"
     "recovery.img"
     "vbmeta.img"

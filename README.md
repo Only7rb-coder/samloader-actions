@@ -90,6 +90,10 @@ https://github.com/user-attachments/assets/900b9659-80ef-417f-bf05-213fae090e87
 
    <img src="./assets/16.png" width="95%">
 
+#### Method 3: Download boot.img and xbl_config.img
+
+Use the **Download boot.img and xbl_config.img** workflow when only these two partitions are needed. Enter the device model and a direct firmware ZIP link from samfw.com, then run the workflow. The generated artifact contains `boot.img`, `xbl_config.img`, and a ZIP containing both files. The firmware must include both partitions; devices that do not provide `xbl_config.img` will cause the workflow to stop with a clear error.
+
 ### 🟢 Step 3: Patching and Flashing
 
 1. Download and extract the artifact zip file

@@ -1,0 +1,81 @@
+name: Download boot.img and xbl_config.img
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Your model number (for example, SM-S918B)"
+        required: true
+        type: string
+      samfw_link:
+        description: "Direct firmware ZIP link from samfw.com"
+        required: true
+        type: string
+
+jobs:
+  download-images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install extraction tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lz4 unzip zip
+
+      - name: Download firmware
+        env:
+          SAMFW_LINK: ${{ inputs.samfw_link }}
+        run: |
+          set -euo pipefail
+          mkdir -p work/packages work/extracted output
+          curl --location --fail --retry 3 --max-time 3600 "$SAMFW_LINK" \
+            --output work/firmware.zip
+          test -s work/firmware.zip
+
+      - name: Extract boot.img and xbl_config.img
+        run: |
+          set -euo pipefail
+          unzip -q work/firmware.zip -d work/packages
+
+          found_archive=0
+          while IFS= read -r -d '' archive; do
+            found_archive=1
+            tar -xf "$archive" -C work/extracted
+          done < <(find work/packages -type f \( -name '*.tar.md5' -o -name '*.tar' \) -print0)
+
+          if [ "$found_archive" -eq 0 ]; then
+            echo "No firmware TAR archive was found in the ZIP."
+            exit 1
+          fi
+
+          while IFS= read -r -d '' compressed; do
+            lz4 -d -f "$compressed" "${compressed%.lz4}"
+            rm -f "$compressed"
+          done < <(find work/extracted -type f -name '*.lz4' -print0)
+
+          for image in boot.img xbl_config.img; do
+            source_file="$(find work/extracted -type f -name "$image" -print -quit)"
+            if [ -z "$source_file" ]; then
+              echo "Required image not found: $image"
+              exit 1
+            fi
+            cp "$source_file" "output/$image"
+          done
+
+          printf 'Model: %s\n' '${{ inputs.model }}' > output/README.txt
+          printf 'Included: boot.img, xbl_config.img\n' >> output/README.txt
+          (cd output && zip -9 "${{ inputs.model }}-boot-xbl_config.zip" boot.img xbl_config.img README.txt)
+
+      - name: Upload images as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ inputs.model }}-boot-xbl_config"
+          path: output/
+          if-no-files-found: error
