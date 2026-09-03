@@ -53,15 +53,18 @@ extract() {
 
 upload_boot_only() {
     local boot_img
+    # The extract step turns boot.img.lz4 into boot.img. Do not upload the
+    # compressed .lz4 source or any other firmware image.
     boot_img=$(find "$WDIR/Downloads" -type f -name 'boot.img' -print -quit)
     if [[ -z "$boot_img" || ! -s "$boot_img" ]]; then
-        echo "[x] boot.img was not found after extraction." >&2
+        echo "[x] Decompressed boot.img was not found after extracting boot.img.lz4." >&2
         exit 1
     fi
 
     mkdir -p "$WDIR/Dist"
-    # Copy the image as-is. No tar, zip, gzip, or other compression is used.
+    # Copy the decompressed image as-is under the exact required filename.
     cp -- "$boot_img" "$WDIR/Dist/boot.img"
+    [[ "$(basename "$WDIR/Dist/boot.img")" == "boot.img" ]] || exit 1
     echo -e "\n${LIGHT_YELLOW}[i] Raw boot.img prepared: $(du -h "$WDIR/Dist/boot.img" | cut -f1)${RESET}"
     upload_to_gofile "$WDIR/Dist/boot.img"
 }

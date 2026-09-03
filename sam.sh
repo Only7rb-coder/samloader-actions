@@ -36,6 +36,7 @@ if [ ! -z "$SAMFW_LINK" ]; then
         --max-connection-per-server=16 \
         --max-concurrent-downloads=1 \
         --min-split-size=10M \
+        --dir="$WDIR/Downloads" \
         --out=firmware.zip \
         --split=16 \
         --summary-interval=10 \
