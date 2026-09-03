@@ -1,11 +1,10 @@
 #!/bin/bash
+set -euo pipefail
 
-set -x
-
-# Import gofile uploader
+# Import GoFile uploader
 source "$WDIR/tools/gofile.sh"
 
-# Required image files
+# Required image files for the normal workflow
 REQUIRED_IMAGES=(
     "boot.img"
     "xbl_config.img"
@@ -17,68 +16,88 @@ REQUIRED_IMAGES=(
     "dtb.img"
     "vendor_boot.img"
     "vbmeta_system.img"
-    #super.img
-    #up_param.bin
-    #you can add more...
-    #enter the file names without .lz4 extensions
 )
 
 extract() {
     cd "$WDIR/Downloads"
-    
-    echo -e "\n${MINT_GREEN}[+] Extracting the firmware Zip...${RESET}\n"
-    
-    unzip firmware.zip && rm firmware.zip
-    
-    for file in *.tar.md5; do
-        tar -xvf "$file"
-    done
 
-    rm -rf *.md5
-    
-    echo -e "\n${LIGHT_YELLOW}[i] Zip Extraction Completed..!${RESET}"
-    
-    # Check and decompress LZ4 files if they exist
-    files=$(find . -name "*.lz4")
-    if [ -n "$files" ]; then
-        echo -e "${MINT_GREEN}[i] Decompressing LZ4 files...${RESET}\n"
-        lz4 -m *.lz4 > /dev/null 2>&1
-        rm *.lz4
+    echo -e "\n${MINT_GREEN}[+] Extracting the firmware Zip...${RESET}\n"
+    unzip -q firmware.zip
+    rm -f firmware.zip
+
+    shopt -s nullglob
+    local tar_files=(*.tar.md5 *.tar)
+    if ((${#tar_files[@]} == 0)); then
+        echo "[x] No firmware TAR archive was found after ZIP extraction." >&2
+        exit 1
+    fi
+
+    for file in "${tar_files[@]}"; do
+        tar -xf "$file"
+    done
+    rm -f -- *.md5
+
+    echo -e "\n${LIGHT_YELLOW}[i] Zip extraction completed.${RESET}"
+
+    # Decompress every LZ4 image wherever it was extracted. The .lz4 source is
+    # removed only after successful decompression, leaving the raw .img file.
+    mapfile -t lz4_files < <(find . -type f -name '*.lz4' -print)
+    if ((${#lz4_files[@]} > 0)); then
+        echo -e "${MINT_GREEN}[i] Decompressing LZ4 images...${RESET}"
+        for file in "${lz4_files[@]}"; do
+            lz4 -f "$file" "${file%.lz4}"
+            rm -f -- "$file"
+        done
     fi
 }
 
-collect_and_package_files() {
-    echo -e "${MINT_GREEN}[+] Copying the Required stock files for Magisk...${RESET}\n"
-    
-    # Create output directory if it doesn't exist
-    mkdir -p "$WDIR/output"
-    
-    # Copy all existing required images to output directory
-    cd "$WDIR/Downloads"
-    for img in "${REQUIRED_IMAGES[@]}"; do
-        if [ -e "$img" ]; then
-            echo -e "${LIGHT_YELLOW}[i] Copying $img${RESET}"
-            cp "$img" "$WDIR/output/"
-        fi
-    done
-    
-    # Create the tar file with all image files
-    cd "$WDIR/output"
-    TAR_NAME="${MODEL}-Magisk-files.tar"
-    tar -cvf "$TAR_NAME" *.img && rm *.img
-    
-    # Create maximum compressed zip from the tar file
+upload_boot_only() {
+    local boot_img
+    boot_img=$(find "$WDIR/Downloads" -type f -name 'boot.img' -print -quit)
+    if [[ -z "$boot_img" || ! -s "$boot_img" ]]; then
+        echo "[x] boot.img was not found after extraction." >&2
+        exit 1
+    fi
+
     mkdir -p "$WDIR/Dist"
-    zip -9 "$WDIR/Dist/${TAR_NAME}.zip" "$TAR_NAME"
-    rm "$TAR_NAME"
-    
-    echo -e "\n${LIGHT_YELLOW}[i] Zip file created: ${TAR_NAME}.zip${RESET}\n"
-
-    upload_to_gofile "$WDIR/Dist/${TAR_NAME}.zip"
-
-
+    # Copy the image as-is. No tar, zip, gzip, or other compression is used.
+    cp -- "$boot_img" "$WDIR/Dist/boot.img"
+    echo -e "\n${LIGHT_YELLOW}[i] Raw boot.img prepared: $(du -h "$WDIR/Dist/boot.img" | cut -f1)${RESET}"
+    upload_to_gofile "$WDIR/Dist/boot.img"
 }
 
-# Main execution
+collect_and_package_files() {
+    if [[ "${BOOT_ONLY:-false}" == "true" ]]; then
+        upload_boot_only
+        return
+    fi
+
+    echo -e "${MINT_GREEN}[+] Copying the required stock files for Magisk...${RESET}\n"
+    mkdir -p "$WDIR/output" "$WDIR/Dist"
+    cd "$WDIR/Downloads"
+    for img in "${REQUIRED_IMAGES[@]}"; do
+        if [[ -e "$img" ]]; then
+            echo -e "${LIGHT_YELLOW}[i] Copying $img${RESET}"
+            cp -- "$img" "$WDIR/output/"
+        fi
+    done
+
+    cd "$WDIR/output"
+    shopt -s nullglob
+    images=( *.img )
+    if ((${#images[@]} == 0)); then
+        echo "[x] No required image files were found." >&2
+        exit 1
+    fi
+    TAR_NAME="${MODEL}-Magisk-files.tar"
+    tar -cf "$TAR_NAME" -- "${images[@]}"
+    rm -f -- "${images[@]}"
+    zip -9 -q "$WDIR/Dist/${TAR_NAME}.zip" "$TAR_NAME"
+    rm -f -- "$TAR_NAME"
+
+    echo -e "\n${LIGHT_YELLOW}[i] Zip file created: ${TAR_NAME}.zip${RESET}\n"
+    upload_to_gofile "$WDIR/Dist/${TAR_NAME}.zip"
+}
+
 extract
 collect_and_package_files

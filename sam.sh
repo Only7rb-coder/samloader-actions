@@ -10,7 +10,7 @@ echo -e "\n${BLUE}Samloader Actions - By @ravindu644${RESET}\n"
 echo -e "\n\t${UNBOLD_GREEN}Installing requirements...${RESET}\n"
 
 # Install dependencies
-sudo apt update -y && sudo apt install simg2img lz4 openssl python3 python-is-python3 python3-pip -y > /dev/null 2>&1
+sudo apt update -y && sudo apt install aria2 simg2img lz4 openssl python3 python-is-python3 python3-pip -y > /dev/null 2>&1
 echo -e "${MAGENTA}\n[+] Success..! ${RESET}\n"
 
 # Create necessary directories
@@ -25,7 +25,21 @@ if [ ! -z "$SAMFW_LINK" ]; then
     echo -e "====================================\n"
 
     echo -e "${MINT_GREEN}[+] Attempting to Download the Firmware From the Provided Link...${RESET}\n"
-    curl -L --fail "$SAMFW_LINK" -o "$WDIR/Downloads/firmware.zip" || { 
+    # Use multiple HTTP connections when the source server supports range requests.
+    # The file contents remain unchanged; this only improves transfer throughput.
+    aria2c \
+        --allow-overwrite=true \
+        --auto-file-renaming=false \
+        --check-certificate=true \
+        --continue=true \
+        --file-allocation=none \
+        --max-connection-per-server=16 \
+        --max-concurrent-downloads=1 \
+        --min-split-size=10M \
+        --out=firmware.zip \
+        --split=16 \
+        --summary-interval=10 \
+        "$SAMFW_LINK" || {
         echo -e "\n${RED}[x] Download Failed..! Please provide a Direct Download Link. ${RESET}\n" >&2
         exit 1
     }

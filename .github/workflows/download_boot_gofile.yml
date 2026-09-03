@@ -1,0 +1,78 @@
+name: Download boot.img and upload to GoFile
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Samsung model number, for example SM-S918B'
+        required: true
+        type: string
+      firmware_link:
+        description: 'Direct SamFW URL to a package such as AP_S948BXXU1AZAB_S948BXXU1AZAB_MQB105378486_REV00_user_low_ship_MULTI_CERT_meta_OS16.tar.md5.zip'
+        required: true
+        type: string
+
+jobs:
+  download-boot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set workflow variables
+        shell: bash
+        run: |
+          echo "MODEL=${{ inputs.model }}" >> "$GITHUB_ENV"
+          echo "SAMFW_LINK=${{ inputs.firmware_link }}" >> "$GITHUB_ENV"
+          echo "BOOT_ONLY=true" >> "$GITHUB_ENV"
+
+      - name: Validate SamFW package URL
+        shell: bash
+        run: |
+          case "$SAMFW_LINK" in
+            http://*|https://*) ;;
+            *) echo 'The firmware input must be a full http(s) URL copied from SamFW.' >&2; exit 1 ;;
+          esac
+          case "$SAMFW_LINK" in
+            *.zip|*.zip\?*) ;;
+            *) echo 'Warning: the URL does not end in .zip; continuing in case SamFW uses a redirected download URL.' ;;
+          esac
+
+      - name: Download, extract, and upload raw boot.img
+        shell: bash
+        run: bash sam.sh
+
+      - name: Verify raw boot.img output
+        shell: bash
+        run: |
+          test -s Dist/boot.img
+          file Dist/boot.img
+          sha256sum Dist/boot.img
+
+      # This is optional and is only a workflow run artifact for troubleshooting.
+      # The GoFile upload above receives Dist/boot.img directly, without tar/zip.
+      - name: Upload raw boot.img as GitHub artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-img-${{ inputs.model }}
+          path: Dist/boot.img
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Publish GoFile link in job summary
+        shell: bash
+        run: |
+          {
+            echo '## Raw boot.img uploaded to GoFile'
+            echo
+            echo "**Model:** \\`${MODEL}\\`"
+            echo
+            echo "**Download link:** ${GOLINK}"
+            echo
+            echo '> The GoFile upload was made from the raw `boot.img`; no tar/zip compression was applied.'
+          } >> "$GITHUB_STEP_SUMMARY"
